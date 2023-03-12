@@ -1,5 +1,6 @@
 ﻿using Microsoft.Extensions.Logging;
 using System;
+using System.Collections.Concurrent;
 using System.Drawing;
 using System.Globalization;
 using System.IO;
@@ -93,44 +94,77 @@ namespace FileDownloader
         {
 
             long size = Link_Request.File_Size(Link);
-            DownloadChunk[] chunks = GetChunks(4 , size);
-
-            Parallel.ForEach(chunks, (chunk) =>
-            {
-                HttpWebRequest request = WebRequest.CreateHttp(Link);
-                request.AddRange(chunk.Start, chunk.End);
-                using WebResponse response = request.GetResponse();
-                using Stream responseStream = response.GetResponseStream();
-                byte[] buffer = new byte[1024];
-                int bytesRead;
-                using MemoryStream memoryStream = new MemoryStream();
-                while ((bytesRead = responseStream.Read(buffer, 0, buffer.Length)) > 0)
-                {
-                    memoryStream.Write(buffer, 0, bytesRead);
-                }
-                chunk.Data = memoryStream.ToArray();
-            });
             
-            using FileStream fs = new("C:\\Users\\Derpy\\Downloads\\" + fileName + Fcontenttype, FileMode.Create);
-            foreach (DownloadChunk chunk in chunks)
+            //When the parallel methods were added so were concurrent collections and other features. Concurrent collections
+            //are multi thread safe.
+            ConcurrentBag<DownloadChunk> chunks = GetChunks(4 , size);
+
+            //https://learn.microsoft.com/en-us/dotnet/standard/parallel-programming/introduction-to-plinq
+            //Parallel operations using LINQ
+            var processedChunks = chunks.AsParallel().Select(x => Download(x, Link)).ToList();
+
+            // DAMIEN :Again when you are using a disposable object you need to use a using statement so it gets rid of it properly. Another
+            //important thing about the using statement is that when it exists the function or if there is an exception it will
+            //automatically close the stream, or dispose of the object.
+            using (FileStream fs = new("C:\\Users\\DamienOstler\\Downloads\\" + fileName + Fcontenttype, FileMode.Create))
             {
-                fs.Write(chunk.Data, 0, chunk.Data.Length);
+                var offset = 0;
+                //Sort by starting so that the one starting at 0 goes first and so on
+                foreach (DownloadChunk chunk in processedChunks.OrderBy(x=>x.Start))
+                {
+                    //You should be using the size element since u already have it here.
+                    fs.Write(chunk.Data, 0, (int)chunk.Size);
+                    offset += chunk.Data.Length;
+                }
             }
             
 
         }
-        private static DownloadChunk[] GetChunks(int parts, long totalsize)
+
+        //NEW METHOD FOR DOWNLOADING THE CHUNKS
+        private static DownloadChunk Download(DownloadChunk chunk,string Link)
         {
-            DownloadChunk[] chunks = new DownloadChunk[parts];
+            HttpWebRequest request = WebRequest.CreateHttp(Link);
+            request.AddRange(chunk.Start, chunk.End);
+            // DAMIEN :When you are using a class that implements a idisposable interface thats when you use a using statement. And to
+            //use it properly you must wrap it as I do below, and then either only have one statement after all of them
+            //indented like you do with a if statement with no {, OR have a opening and closing { } where all the code that
+            //needs that disposable will run. Whenever it exits that codeblock {}, it will automatically call .dispose() on
+            //the disposable. In this case its closing the stream. So the reason everything wasnt working was that all the
+            //the streams were immediatly being closed.
+            using (WebResponse response = request.GetResponse())
+            using (Stream responseStream = response.GetResponseStream())
+            using (MemoryStream memoryStream = new MemoryStream())
+            {
+                byte[] buffer = new byte[1024];
+                int bytesRead;
+                while ((bytesRead = responseStream.Read(buffer, 0, buffer.Length)) > 0)
+                {
+                    memoryStream.Write(buffer, 0, bytesRead);
+                }
+                // DAMIEN : You need to set the posistion of the memory stream to 0 otherwise its never going to actually copy the contents over
+                //since it will not start at the beggining of the the stream but at the 
+                memoryStream.Position = 0;
+                chunk.Data = memoryStream.ToArray();
+                return chunk;
+            }
+        }
+
+        //This method had to be changed to return a concurrent bag so that it is thread safe since you are doing a parallel foreach.
+        private static ConcurrentBag<DownloadChunk> GetChunks(int parts, long totalsize)
+        {
+            ConcurrentBag<DownloadChunk> chunks = new ConcurrentBag<DownloadChunk>();
             long chunksize = totalsize / parts;
 
-            for (int i = 0; i < chunks.Length; i++)
+            // DAMIEN : Changed this loop to use the parts integer since it is the size already.
+            for (int i = 0; i < parts; i++)
             {
-                chunks[i] = new()
+                chunks.Add(new()
                 {
-                    Start = i == 0 ? 0 : chunksize = i + 1,
-                    End = i == 0 ? chunksize : i == chunks.Length - 1 ? totalsize : chunksize * i + chunksize
-                };
+                    //The math on this was wrong
+                    Start = i == 0 ? 0 : chunksize *( i)+1,
+                    End = i == 0 ? chunksize : chunksize * (i + 1)
+                });
             }
             return chunks;
         }
