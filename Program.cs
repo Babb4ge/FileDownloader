@@ -95,6 +95,8 @@ namespace FileDownloader
 
             long size = Link_Request.File_Size(Link);
             
+            //When the parallel methods were added so were concurrent collections and other features. Concurrent collections
+            //are multi thread safe.
             ConcurrentBag<DownloadChunk> chunks = GetChunks(4 , size);
 
             //https://learn.microsoft.com/en-us/dotnet/standard/parallel-programming/introduction-to-plinq
