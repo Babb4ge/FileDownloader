@@ -8,7 +8,7 @@ using Microsoft.Net.Http.Headers;
 
 namespace FileDownloader
 {
-    public class FileInformation
+    public class Link_Request
     {
 
         static async Task<long> GetFileSizeAsync(string url)
@@ -37,7 +37,7 @@ namespace FileDownloader
                 }
             }
         }
-        public static long FiSize(string url)
+        public static long File_Size(string url)
         {
             return GetFileSizeAsync(url).Result;
 
@@ -72,9 +72,12 @@ namespace FileDownloader
             }
         }
 
-        public static string FileType(string url)
+        public static string File_Type(string url)
         {
             return GetFileTypeAsync(url).Result;
         }
+
+
+
     }
 }

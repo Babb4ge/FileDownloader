@@ -1,4 +1,5 @@
-﻿using System;
+﻿using Microsoft.Extensions.Logging;
+using System;
 using System.Drawing;
 using System.Globalization;
 using System.IO;
@@ -18,29 +19,30 @@ namespace FileDownloader
         {
             await FFDLMAIN();
         }
+        //Main Method where information is being retreived
         static async Task FFDLMAIN()
         {
-
+            //Provides Link Information
             Console.WriteLine("Paste the Download Link here");
             Console.Write(">");
-            string Link = Console.ReadLine()??"";
-
-            string PostFilePath = @"C: \Users\Derpy\Downloads\";
-            //Pulls Download Prompt
-            //Gets File Size
-            long filesize = FileInformation.FiSize(Link);
-            string math = IMath.ConvertViaMath(filesize);
-            Console.WriteLine(math + " " + Link);
-            Console.WriteLine("What would you like to name the file?");
-            string fileName = Console.ReadLine()??"";
+            string Link = Console.ReadLine() ?? "";
             Console.Clear();
 
-            string filetype = FileInformation.FileType(Link);
+            //Provides fileName Information
+            Console.WriteLine("What would you like to name the file?");
+            Console.Write(">");
+            string fileName = Console.ReadLine() ?? "";
+            Console.Clear();
+
+            //Retreives the file type and splits it after the / upon retreival
+            string filetype = Link_Request.File_Type(Link);
             string[] parts = filetype.Split("/");
             string Fcontenttype = ("." + parts[1]);
 
+            //Prompts user with the file information obtained for validation
             Console.WriteLine("Is this the correct file type? || " + fileName + Fcontenttype + "\n Press 1 for YES\n Press 2 for NO");
-
+            //Checks for Key input when 1 is pressed it sends the information to be finalized and downloaded
+            //Checks for Key input when 2 in pressed it sends it to SelfType where the user will input the correct file type
             ConsoleKey key;
             do
             {
@@ -66,58 +68,71 @@ namespace FileDownloader
                         break;
                 }
             }
+            //While 1 or 2 are not being pressed nothing will happen
             while (key != ConsoleKey.D1 && key != ConsoleKey.NumPad1 && key != ConsoleKey.NumPad2 && key != ConsoleKey.D2);
         }
 
 
-
+        //Method used for correcting file information if file type retreived via link is incorrect
         private static void SelfType(string fileName, string Link)
         {
-            Console.WriteLine(fileName + Link);
+            //prompts user to input the correct file type
             Console.WriteLine("Input the correct file type");
             Console.Write(">");
             string NewPreType = Console.ReadLine();
+
+            //adds a '.' before the file type before passing it on to finalize
             string Fcontenttype = "." + NewPreType;
             Console.Clear();
             SelfFinalize(fileName, Fcontenttype, Link);
 
 
         }
-        //broken not wokring
-        static async Task SelfFinalize(string fileName, string Fcontenttype, string Link)
+        //Taks information provided and chunks the file into quarters and downloads them at the same time
+        static void SelfFinalize(string fileName, string Fcontenttype, string Link)
         {
-            Console.WriteLine(fileName + Fcontenttype, Link);
-            long filesize;
-            using (var client = new HttpClient())
+
+            long size = Link_Request.File_Size(Link);
+            DownloadChunk[] chunks = GetChunks(4 , size);
+
+            Parallel.ForEach(chunks, (chunk) =>
             {
-                var response = await client.GetAsync(Link, HttpCompletionOption.ResponseHeadersRead);
-                response.EnsureSuccessStatusCode();
-                filesize = FileInformation.FiSize(Link);
-            }
-
-            int chunksize = (int)Math.Ceiling(Convert.ToDouble(filesize) / 4);
-
-            for (int i = 0; i < 4; i++)
-            {
-                int start = i * chunksize;
-                int end = (i == 3) ? (int)filesize - 1 : start + chunksize - 1;
-
-                using (var client = new HttpClient())
+                HttpWebRequest request = WebRequest.CreateHttp(Link);
+                request.AddRange(chunk.Start, chunk.End);
+                using WebResponse response = request.GetResponse();
+                using Stream responseStream = response.GetResponseStream();
+                byte[] buffer = new byte[1024];
+                int bytesRead;
+                using MemoryStream memoryStream = new MemoryStream();
+                while ((bytesRead = responseStream.Read(buffer, 0, buffer.Length)) > 0)
                 {
-                    client.DefaultRequestHeaders.Range = new RangeHeaderValue(start, end);
-                    using (var response = await client.GetAsync(Link, HttpCompletionOption.ResponseHeadersRead))
-                    {
-                        response.EnsureSuccessStatusCode();
-                        using (var stream = await response.Content.ReadAsStreamAsync())
-                        {
-                            using (var fileStream = new FileStream("C:\\Users\\Derpy\\Downloads\\" + fileName + "." + Fcontenttype, FileMode.Create, FileAccess.Write, FileShare.None))
-                            {
-                                await stream.CopyToAsync(fileStream);
-                            }
-                        }
-                    }
+                    memoryStream.Write(buffer, 0, bytesRead);
                 }
+                chunk.Data = memoryStream.ToArray();
+            });
+            
+            using FileStream fs = new("C:\\Users\\Derpy\\Downloads\\" + fileName + Fcontenttype, FileMode.Create);
+            foreach (DownloadChunk chunk in chunks)
+            {
+                fs.Write(chunk.Data, 0, chunk.Data.Length);
             }
+            
+
+        }
+        private static DownloadChunk[] GetChunks(int parts, long totalsize)
+        {
+            DownloadChunk[] chunks = new DownloadChunk[parts];
+            long chunksize = totalsize / parts;
+
+            for (int i = 0; i < chunks.Length; i++)
+            {
+                chunks[i] = new()
+                {
+                    Start = i == 0 ? 0 : chunksize = i + 1,
+                    End = i == 0 ? chunksize : i == chunks.Length - 1 ? totalsize : chunksize * i + chunksize
+                };
+            }
+            return chunks;
         }
     }
 }
